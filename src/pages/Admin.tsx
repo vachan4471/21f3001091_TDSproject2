@@ -23,13 +23,16 @@ import {
 import { 
   ArrowLeftIcon, 
   BookOpenIcon, 
-  CheckCircleIcon, 
+  CheckCircleIcon,
+  DatabaseIcon,
+  DownloadIcon,
   MoonIcon, 
   PlusIcon, 
   RefreshCwIcon,
   SaveIcon, 
   SunIcon, 
-  TrashIcon 
+  TrashIcon,
+  UploadIcon
 } from 'lucide-react';
 import { Switch } from '@/components/ui/switch';
 import { Link } from 'react-router-dom';
@@ -38,8 +41,11 @@ import {
   addQAPair, 
   deleteQAPair, 
   resetQADatabase,
-  getAllQAPairs
+  getAllQAPairs,
+  saveDataToStorage,
+  updatePreTrainedData
 } from '@/utils/preTrainedAnswers';
+import { saveQAPairsToStorage, exportQAData, importQAData } from '@/utils/qaStorage';
 
 const Admin = () => {
   const [question, setQuestion] = useState('');
@@ -50,6 +56,8 @@ const Admin = () => {
   const [passwordProtected, setPasswordProtected] = useState(true);
   const [password, setPassword] = useState('');
   const [authenticated, setAuthenticated] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [fileInput, setFileInput] = useState<HTMLInputElement | null>(null);
   
   useEffect(() => {
     // Load theme preference
@@ -73,6 +81,22 @@ const Admin = () => {
     
     // Load the latest Q&A pairs
     setQaPairs(getAllQAPairs());
+    
+    // Create a file input element for importing data
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.style.display = 'none';
+    input.addEventListener('change', handleFileSelected);
+    document.body.appendChild(input);
+    setFileInput(input);
+    
+    return () => {
+      // Clean up the file input when component unmounts
+      if (input && document.body.contains(input)) {
+        document.body.removeChild(input);
+      }
+    };
   }, []);
   
   useEffect(() => {
@@ -100,38 +124,147 @@ const Admin = () => {
     }
   };
   
-  const handleAddQA = () => {
+  const handleAddQA = async () => {
     if (!question.trim() || !answer.trim()) {
       toast.error('Question and answer are required');
       return;
     }
     
-    addQAPair(question, answer, topic);
-    toast.success('New Q&A pair added successfully!');
+    setIsLoading(true);
     
-    // Refresh the list from storage
-    setQaPairs(getAllQAPairs());
-    
-    // Clear the form
-    setQuestion('');
-    setAnswer('');
-  };
-  
-  const handleDeleteQA = (index: number) => {
-    if (deleteQAPair(index)) {
-      toast.info('Q&A pair removed');
+    try {
+      // Add the Q&A pair and save to storage
+      addQAPair(question, answer, topic);
+      toast.success('New Q&A pair added successfully!');
+      
       // Refresh the list from storage
       setQaPairs(getAllQAPairs());
-    } else {
-      toast.error('Failed to remove Q&A pair');
+      
+      // Clear the form
+      setQuestion('');
+      setAnswer('');
+    } catch (error) {
+      console.error('Error adding Q&A pair:', error);
+      toast.error('Failed to add Q&A pair. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
   };
   
-  const handleResetDatabase = () => {
+  const handleDeleteQA = async (index: number) => {
+    setIsLoading(true);
+    
+    try {
+      if (deleteQAPair(index)) {
+        toast.success('Q&A pair removed successfully');
+        
+        // Refresh the list from storage
+        setQaPairs(getAllQAPairs());
+      } else {
+        toast.error('Failed to remove Q&A pair');
+      }
+    } catch (error) {
+      console.error('Error deleting Q&A pair:', error);
+      toast.error('Error occurred while deleting. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+  
+  const handleResetDatabase = async () => {
     if (confirm('Are you sure you want to reset the database to its initial state? This cannot be undone.')) {
-      resetQADatabase();
-      setQaPairs(getAllQAPairs());
-      toast.success('Database reset to initial values');
+      setIsLoading(true);
+      
+      try {
+        resetQADatabase();
+        toast.success('Database reset successfully');
+        setQaPairs(getAllQAPairs());
+      } catch (error) {
+        console.error('Error resetting database:', error);
+        toast.error('Error occurred while resetting. Some operations may not have completed.');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+  };
+  
+  const handleExportData = () => {
+    try {
+      exportQAData(getAllQAPairs());
+    } catch (error) {
+      console.error('Error exporting data:', error);
+      toast.error('Failed to export data');
+    }
+  };
+  
+  const handleImportClick = () => {
+    if (fileInput) {
+      fileInput.click();
+    }
+  };
+  
+  const handleFileSelected = async (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    
+    if (input.files && input.files.length > 0) {
+      setIsLoading(true);
+      
+      try {
+        const file = input.files[0];
+        const importedData = await importQAData(file);
+        
+        // Ask for confirmation before replacing existing data
+        if (confirm(`Import ${importedData.length} Q&A pairs? This will combine with your existing database.`)) {
+          // Combine with existing data, avoiding duplicates
+          const existingData = getAllQAPairs();
+          const combinedData = [...existingData];
+          
+          // Add only non-duplicate entries from imported data
+          importedData.forEach(importedItem => {
+            // Check if this question already exists
+            const exists = existingData.some(
+              existing => existing.question.trim().toLowerCase() === importedItem.question.trim().toLowerCase()
+            );
+            
+            if (!exists) {
+              combinedData.push(importedItem);
+            }
+          });
+          
+          // Update the database
+          updatePreTrainedData(combinedData);
+          saveDataToStorage();
+          
+          // Refresh the display
+          setQaPairs(getAllQAPairs());
+          toast.success(`Successfully imported ${importedData.length} Q&A pairs`);
+        }
+      } catch (error) {
+        console.error('Error importing data:', error);
+        toast.error('Failed to import data. Please check the file format.');
+      } finally {
+        // Reset the file input
+        input.value = '';
+        setIsLoading(false);
+      }
+    }
+  };
+  
+  const handleForceSync = async () => {
+    setIsLoading(true);
+    
+    try {
+      const success = await saveQAPairsToStorage(getAllQAPairs());
+      if (success) {
+        toast.success('Successfully saved all Q&A data to storage');
+      } else {
+        toast.error('Failed to save data to storage');
+      }
+    } catch (error) {
+      console.error('Error syncing data:', error);
+      toast.error('Error occurred during sync operation');
+    } finally {
+      setIsLoading(false);
     }
   };
   
@@ -217,6 +350,41 @@ const Admin = () => {
           <p className={`text-xl ${darkMode ? 'text-slate-300' : 'text-slate-700'} max-w-2xl mx-auto`}>
             Manage pre-trained questions and answers
           </p>
+          
+          <div className="mt-4 flex justify-center gap-2">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleForceSync}
+              disabled={isLoading}
+              className={`text-xs ${darkMode ? 'bg-slate-800 text-blue-400 border-blue-500/30' : 'bg-blue-50 text-blue-600 border-blue-200'}`}
+            >
+              <SaveIcon size={14} className="mr-1" />
+              {isLoading ? 'Saving...' : 'Save All Data'}
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleExportData}
+              disabled={isLoading}
+              className={`text-xs ${darkMode ? 'bg-slate-800 text-green-400 border-green-500/30' : 'bg-green-50 text-green-600 border-green-200'}`}
+            >
+              <DownloadIcon size={14} className="mr-1" />
+              Export Data
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleImportClick}
+              disabled={isLoading}
+              className={`text-xs ${darkMode ? 'bg-slate-800 text-purple-400 border-purple-500/30' : 'bg-purple-50 text-purple-600 border-purple-200'}`}
+            >
+              <UploadIcon size={14} className="mr-1" />
+              Import Data
+            </Button>
+          </div>
         </header>
         
         <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
@@ -268,11 +436,20 @@ const Admin = () => {
               </div>
             </CardContent>
             <CardFooter className="flex flex-col space-y-2">
-              <Button onClick={handleAddQA} className="w-full">
+              <Button 
+                onClick={handleAddQA} 
+                className="w-full"
+                disabled={isLoading}
+              >
                 <SaveIcon size={16} className="mr-2" />
-                Save Q&A Pair
+                {isLoading ? 'Saving...' : 'Save Q&A Pair'}
               </Button>
-              <Button onClick={handleResetDatabase} variant="outline" className="w-full text-yellow-500 hover:text-yellow-600">
+              <Button 
+                onClick={handleResetDatabase} 
+                variant="outline" 
+                className="w-full text-yellow-500 hover:text-yellow-600"
+                disabled={isLoading}
+              >
                 <RefreshCwIcon size={16} className="mr-2" />
                 Reset Database
               </Button>
@@ -306,6 +483,7 @@ const Admin = () => {
                         variant="ghost" 
                         size="sm" 
                         onClick={() => handleDeleteQA(index)}
+                        disabled={isLoading}
                         className="h-6 w-6 p-0 text-red-400 hover:text-red-500 hover:bg-red-600/10"
                       >
                         <TrashIcon size={14} />

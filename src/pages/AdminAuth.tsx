@@ -5,7 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { LockIcon, KeyIcon } from 'lucide-react';
-import { initializeQADatabase, saveQAPairsToGist } from '@/utils/gistStorage';
+import { initializeQADatabase } from '@/utils/qaStorage';
 import { updatePreTrainedData, getAllQAPairs } from '@/utils/preTrainedAnswers';
 
 const AdminAuth = () => {
@@ -22,25 +22,19 @@ const AdminAuth = () => {
     if (password === '21f3001091') {
       localStorage.setItem('admin_authenticated', 'true');
       
-      // Sync with cloud database to ensure admin has the latest data
+      // Sync with database to ensure admin has the latest data
       try {
-        toast.info('Syncing with cloud database...');
-        const cloudData = await initializeQADatabase();
-        updatePreTrainedData(cloudData);
-        console.log(`Admin: Synced ${cloudData.length} Q&A pairs from cloud storage`);
+        toast.info('Loading Q&A database...');
         
-        // Test write access to cloud storage
-        const currentData = getAllQAPairs();
-        const testResult = await saveQAPairsToGist(currentData);
+        // Initialize the database
+        const storageData = await initializeQADatabase();
+        updatePreTrainedData(storageData);
+        console.log(`Admin: Loaded ${storageData.length} Q&A pairs from storage`);
         
-        if (testResult) {
-          toast.success('Admin access granted with cloud storage write access');
-        } else {
-          toast.warning('Admin access granted, but cloud storage write access might be limited');
-        }
+        toast.success('Admin access granted');
       } catch (error) {
-        console.error('Error syncing with cloud storage:', error);
-        toast.warning('Admin access granted, but cloud sync failed. Some features may be limited.');
+        console.error('Error loading Q&A database:', error);
+        toast.warning('Admin access granted, but database sync failed. Some features may be limited.');
       }
       
       navigate('/admin');
